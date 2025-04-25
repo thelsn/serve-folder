@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>File Server</title>
+    <link rel="stylesheet" href="webui/style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>File Server</h1>
+            <div class="controls">
+                <button id="stopServer" class="btn danger">Stop Server</button>
+            </div>
+        </header>
+        
+        <main>
+            <div class="breadcrumbs" id="breadcrumbs">
+                <a href="#" data-path="">Root</a>
+            </div>
+            
+            <div class="file-list" id="fileList">
+                <div class="loader">Loading...</div>
+            </div>
+        </main>
+        
+        <footer>
+            <p>Simple File Server with Web UI</p>
+        </footer>
+    </div>
+    
+    <div class="modal" id="confirmModal">
+        <div class="modal-content">
+            <h2>Confirm Action</h2>
+            <p>Are you sure you want to stop the server?</p>
+            <div class="modal-buttons">
+                <button id="confirmYes" class="btn danger">Yes, Stop Server</button>
+                <button id="confirmNo" class="btn">Cancel</button>
+            </div>
+        </div>
+    </div>
+    
+    <script src="webui/script.js"></script>
+</body>
+</html>
