@@ -88,8 +88,8 @@ async fn main() {
         .or(root_redirect)
         .or(warp::fs::dir(serve_path));
 
-    let addr: SocketAddr = ([127, 0, 0, 1], 8080).into();
-    println!("Serving on http://{}. Visit this URL to access the web UI.", addr);
+    let addr: SocketAddr = ([0, 0, 0, 0], 8080).into();
+    println!("Serving on http://127.0.0.1:8080 Visit this URL to access the web UI.");
     println!("Press Ctrl+C to stop the server");
 
     // Run server with graceful shutdown
