@@ -59,8 +59,31 @@ document.addEventListener('DOMContentLoaded', () => {
                     <span class="icon folder">📁</span>
                     <span class="name">${escapeHtml(entry.name)}</span>
                     <span class="size">Folder</span>
+                    <div class="actions">
+                        <button class="action-btn download" title="Download folder as ZIP">📦</button>
+                    </div>
                 `;
-                item.addEventListener('click', () => loadDirectory(entry.path));
+                
+                // Add click event for folder name (navigate)
+                const nameEl = item.querySelector('.name');
+                nameEl.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    loadDirectory(entry.path);
+                });
+                
+                // Add click event for folder download button
+                const downloadBtn = item.querySelector('.action-btn.download');
+                downloadBtn.addEventListener('click', (e) => {
+                    e.stopPropagation(); // Prevent triggering the parent click event
+                    downloadFolder(entry.path, entry.name);
+                });
+                
+                // Make folder item clickable for navigation
+                item.addEventListener('click', (e) => {
+                    if (e.target === item || e.target.classList.contains('icon')) {
+                        loadDirectory(entry.path);
+                    }
+                });
             } else {
                 item.innerHTML = `
                     <span class="icon file">📄</span>
@@ -187,6 +210,143 @@ document.addEventListener('DOMContentLoaded', () => {
         
         // Clean up
         document.body.removeChild(anchor);
+    };
+    
+    // Function to trigger folder download as zip
+    const downloadFolder = (path, folderName) => {
+        // Show download status in UI with progress bar
+        const downloadStatus = document.createElement('div');
+        downloadStatus.className = 'download-status';
+        downloadStatus.innerHTML = `
+            <h4>Downloading ${escapeHtml(folderName)}</h4>
+            <p class="current-file">Initializing...</p>
+            <div class="progress-container">
+                <div class="progress-bar" style="width: 0%"></div>
+            </div>
+            <p class="progress-text">0%</p>
+        `;
+        document.body.appendChild(downloadStatus);
+        
+        // First initialize the ZIP operation to get an operation ID
+        console.log(`Initializing ZIP operation for ${path}`);
+        fetch(`/api/zip/init?path=${encodeURIComponent(path)}`)
+            .then(response => {
+                if (!response.ok) throw new Error("Failed to initialize zip operation");
+                return response.json();
+            })
+            .then(data => {
+                if (!data.success) {
+                    throw new Error("Server reported initialization failure");
+                }
+                
+                const operationId = data.operationId;
+                console.log(`Got operation ID: ${operationId}`);
+                
+                // Start progress polling immediately
+                const progressPoller = pollZipProgress(operationId, downloadStatus);
+                
+                // Then start the actual download
+                return fetch(`/api/download/folder?path=${encodeURIComponent(path)}&operation_id=${operationId}`)
+                    .then(response => {
+                        if (!response.ok) {
+                            throw new Error(`HTTP error! Status: ${response.status}`);
+                        }
+                        return response.blob();
+                    })
+                    .then(blob => {
+                        // Mark polling as complete
+                        if (progressPoller.stop) progressPoller.stop();
+                        
+                        // Show download is complete
+                        downloadStatus.querySelector('.current-file').textContent = 'Download complete!';
+                        downloadStatus.querySelector('.progress-bar').style.width = '100%';
+                        downloadStatus.querySelector('.progress-text').textContent = '100%';
+                        
+                        // Create download URL
+                        const url = window.URL.createObjectURL(blob);
+                        
+                        // Create and click download link
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = `${folderName}.zip`;
+                        a.style.display = 'none';
+                        document.body.appendChild(a);
+                        a.click();
+                        
+                        // Clean up
+                        window.URL.revokeObjectURL(url);
+                        document.body.removeChild(a);
+                        
+                        // Remove status after delay
+                        setTimeout(() => {
+                            document.body.removeChild(downloadStatus);
+                        }, 3000);
+                    });
+            })
+            .catch(error => {
+                console.error('Download error:', error);
+                downloadStatus.innerHTML = `<p class="error">Error: ${error.message}</p>`;
+                setTimeout(() => {
+                    document.body.removeChild(downloadStatus);
+                }, 5000);
+            });
+    };
+    
+    // Function to poll for zip creation progress
+    const pollZipProgress = (operationId, statusElement) => {
+        const progressBar = statusElement.querySelector('.progress-bar');
+        const progressText = statusElement.querySelector('.progress-text');
+        const currentFileElement = statusElement.querySelector('.current-file');
+        
+        console.log(`Starting progress polling for operation: ${operationId}`);
+        let stopPolling = false;
+        
+        // Function to update the progress bar
+        const updateProgress = () => {
+            if (stopPolling) return;
+            
+            fetch(`/api/zip/progress?id=${operationId}`)
+                .then(response => response.json())
+                .then(data => {
+                    console.log('Progress update:', data);
+                    
+                    // Update progress UI
+                    const percentage = Math.min(Math.round(data.percentage), 99);
+                    progressBar.style.width = `${percentage}%`;
+                    
+                    // Format the progress text
+                    let statusText = `${percentage}%`;
+                    if (data.total_files > 0) {
+                        statusText += ` (${data.processed_files}/${data.total_files} files)`;
+                    }
+                    progressText.textContent = statusText;
+                    
+                    // Show current file being processed
+                    if (data.current_file) {
+                        currentFileElement.textContent = data.current_file;
+                    }
+                    
+                    // Continue polling if not complete
+                    if (percentage < 99 && !stopPolling) {
+                        setTimeout(updateProgress, 300);
+                    }
+                })
+                .catch(error => {
+                    console.error('Error checking progress:', error);
+                    // Try again unless stopped
+                    if (!stopPolling) {
+                        setTimeout(updateProgress, 1000);
+                    }
+                });
+        };
+        
+        // Start polling
+        updateProgress();
+        
+        // Return an object that can be used to stop polling
+        return {
+            stop: () => { stopPolling = true; }
+        };
     };
     
     // Initialize the file browser
