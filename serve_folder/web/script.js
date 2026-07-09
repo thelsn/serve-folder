@@ -1,354 +1,312 @@
 document.addEventListener('DOMContentLoaded', () => {
-    // Elements
-    const fileList = document.getElementById('fileList');
-    const breadcrumbs = document.getElementById('breadcrumbs');
-    const stopServerBtn = document.getElementById('stopServer');
-    const confirmModal = document.getElementById('confirmModal');
-    const confirmYesBtn = document.getElementById('confirmYes');
-    const confirmNoBtn = document.getElementById('confirmNo');
-    
-    // Current path for navigation
     let currentPath = '';
-    
-    // Load directory contents
+
+    // Register Service Worker for PWA
+    if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('/service-worker.js')
+            .then(registration => console.log('Service Worker registered'))
+            .catch(error => console.log('Service Worker registration failed:', error));
+    }
+
+    // Load directory listing
     const loadDirectory = (path = '') => {
+        currentPath = path;
+        const fileList = document.getElementById('fileList');
         fileList.innerHTML = '<div class="loader">Loading...</div>';
-        
+
         fetch(`/api/list?path=${encodeURIComponent(path)}`)
             .then(response => response.json())
             .then(data => {
-                displayFiles(data);
-                updateBreadcrumbs(data.current_path);
-                currentPath = data.current_path;
+                renderBreadcrumb(data.current_path);
+                renderFileList(data.entries);
             })
             .catch(error => {
-                fileList.innerHTML = `<div class="error">Error loading directory: ${error.message}</div>`;
+                console.error('Error loading directory:', error);
+                fileList.innerHTML = '<p class="error">Failed to load directory</p>';
             });
     };
-    
-    // Display files in the UI
-    const displayFiles = (data) => {
-        fileList.innerHTML = '';
+
+    // Render breadcrumb navigation
+    const renderBreadcrumb = (path) => {
+        const breadcrumb = document.getElementById('breadcrumb');
+        const parts = path ? path.split('/').filter(p => p) : [];
         
-        // Add parent directory link if not at root
-        if (data.current_path) {
-            const parentPath = data.current_path.split('/').slice(0, -1).join('/');
-            const parentItem = document.createElement('div');
-            parentItem.className = 'file-item';
-            parentItem.innerHTML = `
-                <span class="icon folder">📁</span>
-                <span class="name">..</span>
-                <span class="size">Parent Directory</span>
-            `;
-            parentItem.addEventListener('click', () => loadDirectory(parentPath));
-            fileList.appendChild(parentItem);
-        }
+        let html = '<a href="#" data-path="">🏠 Home</a>';
+        let currentPath = '';
         
-        // Add all entries
-        if (data.entries.length === 0) {
-            fileList.innerHTML += '<div class="file-item">No files found</div>';
+        parts.forEach(part => {
+            currentPath += (currentPath ? '/' : '') + part;
+            html += ` / <a href="#" data-path="${currentPath}">${part}</a>`;
+        });
+        
+        breadcrumb.innerHTML = html;
+        
+        // Add click handlers
+        breadcrumb.querySelectorAll('a').forEach(link => {
+            link.addEventListener('click', (e) => {
+                e.preventDefault();
+                loadDirectory(link.dataset.path);
+            });
+        });
+    };
+
+    // Render file list
+    const renderFileList = (entries) => {
+        const fileList = document.getElementById('fileList');
+        
+        if (entries.length === 0) {
+            fileList.innerHTML = '<p class="empty">This folder is empty</p>';
             return;
         }
         
-        data.entries.forEach(entry => {
-            const item = document.createElement('div');
-            item.className = 'file-item';
+        let html = '<table class="file-table"><thead><tr><th>Name</th><th>Size</th><th>Actions</th></tr></thead><tbody>';
+        
+        entries.forEach(entry => {
+            const icon = entry.is_dir ? '📁' : '📄';
+            const size = entry.is_dir ? '-' : formatFileSize(entry.size);
             
-            if (entry.is_dir) {
-                item.innerHTML = `
-                    <span class="icon folder">📁</span>
-                    <span class="name">${escapeHtml(entry.name)}</span>
-                    <span class="size">Folder</span>
-                    <div class="actions">
-                        <button class="action-btn download" title="Download folder as ZIP">📦</button>
-                    </div>
-                `;
-                
-                // Add click event for folder name (navigate)
-                const nameEl = item.querySelector('.name');
-                nameEl.addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    loadDirectory(entry.path);
-                });
-                
-                // Add click event for folder download button
-                const downloadBtn = item.querySelector('.action-btn.download');
-                downloadBtn.addEventListener('click', (e) => {
-                    e.stopPropagation(); // Prevent triggering the parent click event
-                    downloadFolder(entry.path, entry.name);
-                });
-                
-                // Make folder item clickable for navigation
-                item.addEventListener('click', (e) => {
-                    if (e.target === item || e.target.classList.contains('icon')) {
-                        loadDirectory(entry.path);
+            html += `<tr>
+                <td class="file-name">
+                    ${icon} 
+                    ${entry.is_dir 
+                        ? `<a href="#" class="dir-link" data-path="${entry.path}">${entry.name}</a>`
+                        : `<span>${entry.name}</span>`
                     }
-                });
-            } else {
-                item.innerHTML = `
-                    <span class="icon file">📄</span>
-                    <span class="name">${escapeHtml(entry.name)}</span>
-                    <span class="size">${formatFileSize(entry.size)}</span>
-                    <div class="actions">
-                        <button class="action-btn download" title="Download this file">⬇️</button>
-                    </div>
-                `;
-                
-                // Add click event for the file name (open in new tab)
-                const nameEl = item.querySelector('.name');
-                nameEl.style.cursor = 'pointer';
-                nameEl.addEventListener('click', () => {
-                    window.open(`/${entry.path}`, '_blank');
-                });
-                
-                // Add click event for download button
-                const downloadBtn = item.querySelector('.action-btn.download');
-                downloadBtn.addEventListener('click', (e) => {
-                    e.stopPropagation(); // Prevent triggering the parent click event
-                    downloadFile(entry.path, entry.name);
-                });
-            }
-            
-            fileList.appendChild(item);
+                </td>
+                <td class="file-size">${size}</td>
+                <td class="file-actions">
+                    ${entry.is_dir 
+                        ? `<button class="btn btn-sm" onclick="downloadFolder('${entry.path}')">📦 Download ZIP</button>`
+                        : ''
+                    }
+                </td>
+            </tr>`;
         });
-    };
-    
-    // Update breadcrumb navigation
-    const updateBreadcrumbs = (path) => {
-        breadcrumbs.innerHTML = '<a href="#" data-path="">Root</a>';
         
-        if (path) {
-            const parts = path.split('/');
-            let currentPath = '';
-            
-            parts.forEach((part, index) => {
-                if (part) {
-                    currentPath += (currentPath ? '/' : '') + part;
-                    breadcrumbs.innerHTML += ` / <a href="#" data-path="${currentPath}">${escapeHtml(part)}</a>`;
-                }
-            });
-        }
+        html += '</tbody></table>';
+        fileList.innerHTML = html;
         
-        // Add click events to breadcrumbs
-        breadcrumbs.querySelectorAll('a').forEach(link => {
+        // Add click handlers for directories
+        fileList.querySelectorAll('.dir-link').forEach(link => {
             link.addEventListener('click', (e) => {
                 e.preventDefault();
-                loadDirectory(link.getAttribute('data-path'));
+                loadDirectory(link.dataset.path);
             });
         });
     };
-    
-    // Handle stop server button
-    stopServerBtn.addEventListener('click', () => {
-        confirmModal.style.display = 'flex';
-    });
-    
-    confirmYesBtn.addEventListener('click', () => {
-        fetch('/api/stop', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ confirm: true })
-        })
-        .then(response => response.json())
-        .then(data => {
-            if (data.success) {
-                document.body.innerHTML = `
-                    <div class="container">
-                        <div class="server-stopped">
-                            <h1>Server Stopped</h1>
-                            <p>The file server has been shut down.</p>
-                        </div>
-                    </div>
-                `;
-            } else {
-                alert('Failed to stop server: ' + data.message);
-            }
-        })
-        .catch(error => {
-            alert('Error stopping server: ' + error.message);
-        })
-        .finally(() => {
-            confirmModal.style.display = 'none';
-        });
-    });
-    
-    confirmNoBtn.addEventListener('click', () => {
-        confirmModal.style.display = 'none';
-    });
-    
-    // Utility functions
+
+    // Format file size
     const formatFileSize = (bytes) => {
-        if (bytes === 0) return '0 Bytes';
+        if (bytes === 0) return '0 B';
         const k = 1024;
-        const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
+        const sizes = ['B', 'KB', 'MB', 'GB'];
         const i = Math.floor(Math.log(bytes) / Math.log(k));
-        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
     };
-    
-    const escapeHtml = (unsafe) => {
-        return unsafe
-            .replace(/&/g, "&amp;")
-            .replace(/</g, "&lt;")
-            .replace(/>/g, "&gt;")
-            .replace(/"/g, "&quot;")
-            .replace(/'/g, "&#039;");
-    };
-    
-    // Function to trigger file download
-    const downloadFile = (path, filename) => {
-        // Create a temporary anchor element
-        const anchor = document.createElement('a');
-        anchor.href = `/${path}`;
-        anchor.download = filename; // This attribute triggers download instead of navigation
-        anchor.style.display = 'none';
-        document.body.appendChild(anchor);
-        
-        // Trigger the download
-        anchor.click();
-        
-        // Clean up
-        document.body.removeChild(anchor);
-    };
-    
-    // Function to trigger folder download as zip
-    const downloadFolder = (path, folderName) => {
-        // Show download status in UI with progress bar
-        const downloadStatus = document.createElement('div');
-        downloadStatus.className = 'download-status';
-        downloadStatus.innerHTML = `
-            <h4>Downloading ${escapeHtml(folderName)}</h4>
-            <p class="current-file">Initializing...</p>
-            <div class="progress-container">
-                <div class="progress-bar" style="width: 0%"></div>
-            </div>
-            <p class="progress-text">0%</p>
-        `;
-        document.body.appendChild(downloadStatus);
-        
-        // First initialize the ZIP operation to get an operation ID
-        console.log(`Initializing ZIP operation for ${path}`);
-        fetch(`/api/zip/init?path=${encodeURIComponent(path)}`)
-            .then(response => {
-                if (!response.ok) throw new Error("Failed to initialize zip operation");
-                return response.json();
-            })
-            .then(data => {
-                if (!data.success) {
-                    throw new Error("Server reported initialization failure");
+
+    // Download folder as ZIP
+    window.downloadFolder = async (path) => {
+        const folderName = path.split('/').filter(Boolean).pop() || 'folder';
+        let progressInterval = null;
+
+        try {
+            const initResponse = await fetch(`/api/zip/init?path=${encodeURIComponent(path)}`);
+            const initData = await initResponse.json();
+
+            if (!initData.success) {
+                alert('Failed to initialize ZIP operation');
+                return;
+            }
+
+            const operationId = initData.operationId;
+
+            const statusDiv = document.createElement('div');
+            statusDiv.className = 'download-status';
+            statusDiv.innerHTML = `
+                <p class="current-file">Preparing download...</p>
+                <div class="progress-container">
+                    <div class="progress-bar" style="width: 0%"></div>
+                </div>
+                <p class="progress-text">0%</p>
+            `;
+            document.body.appendChild(statusDiv);
+
+            const progressBar = statusDiv.querySelector('.progress-bar');
+            const progressText = statusDiv.querySelector('.progress-text');
+            const currentFile = statusDiv.querySelector('.current-file');
+
+            progressInterval = setInterval(async () => {
+                try {
+                    const progressResponse = await fetch(`/api/zip/progress?id=${encodeURIComponent(operationId)}`);
+                    const progress = await progressResponse.json();
+
+                    progressBar.style.width = `${progress.percentage}%`;
+                    progressText.textContent = progress.total_files > 0
+                        ? `${Math.round(progress.percentage)}% (${progress.processed_files}/${progress.total_files})`
+                        : `${Math.round(progress.percentage)}%`;
+                    currentFile.textContent = progress.current_file || 'Preparing download...';
+                } catch (error) {
+                    console.error('Progress polling error:', error);
                 }
-                
-                const operationId = data.operationId;
-                console.log(`Got operation ID: ${operationId}`);
-                
-                // Start progress polling immediately
-                const progressPoller = pollZipProgress(operationId, downloadStatus);
-                
-                // Then start the actual download
-                return fetch(`/api/download/folder?path=${encodeURIComponent(path)}&operation_id=${operationId}`)
-                    .then(response => {
-                        if (!response.ok) {
-                            throw new Error(`HTTP error! Status: ${response.status}`);
-                        }
-                        return response.blob();
-                    })
-                    .then(blob => {
-                        // Mark polling as complete
-                        if (progressPoller.stop) progressPoller.stop();
-                        
-                        // Show download is complete
-                        downloadStatus.querySelector('.current-file').textContent = 'Download complete!';
-                        downloadStatus.querySelector('.progress-bar').style.width = '100%';
-                        downloadStatus.querySelector('.progress-text').textContent = '100%';
-                        
-                        // Create download URL
-                        const url = window.URL.createObjectURL(blob);
-                        
-                        // Create and click download link
-                        const a = document.createElement('a');
-                        a.href = url;
-                        a.download = `${folderName}.zip`;
-                        a.style.display = 'none';
-                        document.body.appendChild(a);
-                        a.click();
-                        
-                        // Clean up
-                        window.URL.revokeObjectURL(url);
-                        document.body.removeChild(a);
-                        
-                        // Remove status after delay
-                        setTimeout(() => {
-                            document.body.removeChild(downloadStatus);
-                        }, 3000);
-                    });
-            })
-            .catch(error => {
-                console.error('Download error:', error);
-                downloadStatus.innerHTML = `<p class="error">Error: ${error.message}</p>`;
-                setTimeout(() => {
-                    document.body.removeChild(downloadStatus);
-                }, 5000);
+            }, 250);
+
+            const response = await fetch(`/api/download/folder?path=${encodeURIComponent(path)}&operation_id=${encodeURIComponent(operationId)}`);
+
+            clearInterval(progressInterval);
+            progressInterval = null;
+
+            if (!response.ok) {
+                throw new Error('Download failed');
+            }
+
+            currentFile.textContent = 'Saving ZIP file...';
+            progressBar.style.width = '100%';
+            progressText.textContent = '100%';
+
+            const blob = await response.blob();
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = `${folderName}.zip`;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
+
+            currentFile.textContent = 'Download complete';
+            setTimeout(() => {
+                statusDiv.remove();
+            }, 1500);
+        } catch (error) {
+            if (progressInterval) {
+                clearInterval(progressInterval);
+            }
+            console.error('Download error:', error);
+            alert('Failed to download folder');
+        }
+    };
+
+    // Upload functionality
+    const uploadBtn = document.getElementById('uploadBtn');
+    const uploadModal = document.getElementById('uploadModal');
+    const closeModal = document.querySelector('.close');
+    const uploadArea = document.getElementById('uploadArea');
+    const fileInput = document.getElementById('fileInput');
+    const uploadProgress = document.getElementById('uploadProgress');
+
+    uploadBtn.addEventListener('click', () => {
+        uploadModal.style.display = 'block';
+    });
+
+    closeModal.addEventListener('click', () => {
+        uploadModal.style.display = 'none';
+    });
+
+    window.addEventListener('click', (event) => {
+        if (event.target === uploadModal) {
+            uploadModal.style.display = 'none';
+        }
+    });
+
+    uploadArea.addEventListener('click', () => {
+        fileInput.click();
+    });
+
+    fileInput.addEventListener('change', (e) => {
+        if (e.target.files.length > 0) {
+            uploadFiles(Array.from(e.target.files));
+        }
+    });
+
+    // Drag and drop
+    uploadArea.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        uploadArea.classList.add('dragover');
+    });
+
+    uploadArea.addEventListener('dragleave', () => {
+        uploadArea.classList.remove('dragover');
+    });
+
+    uploadArea.addEventListener('drop', (e) => {
+        e.preventDefault();
+        uploadArea.classList.remove('dragover');
+        
+        const files = Array.from(e.dataTransfer.files);
+        if (files.length > 0) {
+            uploadFiles(files);
+        }
+    });
+
+    // Upload files function
+    const uploadFiles = async (files) => {
+        const formData = new FormData();
+        
+        files.forEach(file => {
+            formData.append('file', file);
+        });
+
+        uploadArea.style.display = 'none';
+        uploadProgress.style.display = 'block';
+        
+        const progressBar = uploadProgress.querySelector('.progress-bar');
+        const progressText = uploadProgress.querySelector('.progress-text');
+        const uploadStatus = uploadProgress.querySelector('.upload-status');
+
+        try {
+            const response = await fetch(`/api/upload?path=${encodeURIComponent(currentPath)}`, {
+                method: 'POST',
+                body: formData
             });
-    };
-    
-    // Function to poll for zip creation progress
-    const pollZipProgress = (operationId, statusElement) => {
-        const progressBar = statusElement.querySelector('.progress-bar');
-        const progressText = statusElement.querySelector('.progress-text');
-        const currentFileElement = statusElement.querySelector('.current-file');
-        
-        console.log(`Starting progress polling for operation: ${operationId}`);
-        let stopPolling = false;
-        
-        // Function to update the progress bar
-        const updateProgress = () => {
-            if (stopPolling) return;
+
+            if (!response.ok) {
+                throw new Error('Upload failed');
+            }
+ 
+            const result = await response.json();
             
-            fetch(`/api/zip/progress?id=${operationId}`)
-                .then(response => response.json())
-                .then(data => {
-                    console.log('Progress update:', data);
-                    
-                    // Update progress UI
-                    const percentage = Math.min(Math.round(data.percentage), 99);
-                    progressBar.style.width = `${percentage}%`;
-                    
-                    // Format the progress text
-                    let statusText = `${percentage}%`;
-                    if (data.total_files > 0) {
-                        statusText += ` (${data.processed_files}/${data.total_files} files)`;
-                    }
-                    progressText.textContent = statusText;
-                    
-                    // Show current file being processed
-                    if (data.current_file) {
-                        currentFileElement.textContent = data.current_file;
-                    }
-                    
-                    // Continue polling if not complete
-                    if (percentage < 99 && !stopPolling) {
-                        setTimeout(updateProgress, 300);
-                    }
-                })
-                .catch(error => {
-                    console.error('Error checking progress:', error);
-                    // Try again unless stopped
-                    if (!stopPolling) {
-                        setTimeout(updateProgress, 1000);
-                    }
-                });
-        };
-        
-        // Start polling
-        updateProgress();
-        
-        // Return an object that can be used to stop polling
-        return {
-            stop: () => { stopPolling = true; }
-        };
+            progressBar.style.width = '100%';
+            progressText.textContent = '100%';
+            uploadStatus.textContent = `✅ Successfully uploaded ${result.count} file(s)`;
+            
+            setTimeout(() => {
+                uploadModal.style.display = 'none';
+                uploadArea.style.display = 'block';
+                uploadProgress.style.display = 'none';
+                progressBar.style.width = '0%';
+                progressText.textContent = '0%';
+                fileInput.value = '';
+                loadDirectory(currentPath);
+            }, 1500);
+            
+        } catch (error) {
+            console.error('Upload error:', error);
+            uploadStatus.textContent = '❌ Upload failed: ' + error.message;
+            
+            setTimeout(() => {
+                uploadArea.style.display = 'block';
+                uploadProgress.style.display = 'none';
+            }, 2000);
+        }
     };
-    
-    // Initialize the file browser
+
+    // Stop server button
+    const stopBtn = document.getElementById('stopBtn');
+    stopBtn.addEventListener('click', async () => {
+        if (confirm('Are you sure you want to stop the server?')) {
+            try {
+                await fetch('/api/stop', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ confirm: true })
+                });
+                alert('Server is shutting down...');
+            } catch (error) {
+                console.error('Error stopping server:', error);
+            }
+        }
+    });
+
+    // Load initial directory
     loadDirectory();
 });

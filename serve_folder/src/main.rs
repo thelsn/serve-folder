@@ -11,7 +11,7 @@ use tokio::sync::oneshot;
 use warp::Filter;
 
 use crate::state::ServerState;
-use crate::handlers::{handle_list, handle_stop, handle_download_folder, handle_zip_progress, handle_zip_init};
+use crate::handlers::{handle_list, handle_stop, handle_download_folder, handle_zip_progress, handle_zip_init, handle_upload};
 use crate::web::serve_web_ui;
 
 #[tokio::main]
@@ -66,6 +66,13 @@ async fn main() {
         .and(state.with_state())
         .and_then(handle_zip_init);
 
+    let api_upload = warp::path!("api" / "upload")
+        .and(warp::post())
+        .and(warp::multipart::form().max_length(5_000_000_000)) // 5GB max
+        .and(warp::query())
+        .and(state.with_state())
+        .and_then(handle_upload);
+
     // Serve web UI files
     let web_ui = warp::path("webui")
         .and(warp::get())
@@ -83,6 +90,7 @@ async fn main() {
         .or(api_download_folder)
         .or(api_zip_progress)
         .or(api_zip_init)
+        .or(api_upload)
         .or(web_ui)
         .or(root_redirect)
         .or(warp::fs::dir(serve_path));

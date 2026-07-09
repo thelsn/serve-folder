@@ -1,8 +1,11 @@
 use std::path::Path;
 use std::fs;
-use std::io::Read;
-use warp::{Reply, Rejection, http::HeaderValue};
+use std::io::Write;
+use warp::{Reply, Rejection, http::HeaderValue, multipart::FormData};
 use tempfile::NamedTempFile;
+use futures_util::{TryStreamExt, StreamExt};
+use bytes::Buf;
+use tokio_util::io::ReaderStream;
 
 use crate::models::{FileEntry, DirResponse, StopRequest, DownloadQuery, ProgressQuery, ZipCreationError};
 use crate::state::ServerState;
@@ -238,23 +241,40 @@ pub async fn handle_download_folder(query: DownloadQuery, state: ServerState) ->
         return Err(warp::reject::custom(ZipCreationError));
     }
     
-    // Clean up progress tracking
-    state.remove_progress(&operation_id);
-    
-    // Read ZIP file
-    let mut file = match fs::File::open(&temp_path) {
-        Ok(file) => file,
+    // Keep temp file on disk so we can stream it to the client
+    let (_, temp_path) = match temp_file.keep() {
+        Ok(paths) => paths,
         Err(_) => return Err(warp::reject::custom(ZipCreationError)),
     };
     
-    let mut buffer = Vec::new();
-    if file.read_to_end(&mut buffer).is_err() {
-        return Err(warp::reject::custom(ZipCreationError));
-    }
+    state.update_progress(&operation_id, crate::models::ZipProgress {
+        current_file: "Sending ZIP file...".to_string(),
+        processed_files: total_files,
+        total_files,
+        percentage: 100.0,
+    });
+    
+    let file = match tokio::fs::File::open(&temp_path).await {
+        Ok(file) => file,
+        Err(_) => {
+            let _ = fs::remove_file(&temp_path);
+            return Err(warp::reject::custom(ZipCreationError));
+        }
+    };
+    
+    let cleanup_path = temp_path.clone();
+    let byte_stream = ReaderStream::new(file).map(|result| {
+        result.map_err(|err| std::io::Error::new(std::io::ErrorKind::Other, err))
+    });
+    let stream = byte_stream.chain(futures_util::stream::once(async move {
+        let _ = tokio::fs::remove_file(cleanup_path).await;
+        Ok::<bytes::Bytes, std::io::Error>(bytes::Bytes::new())
+    }));
     
     // Return response with appropriate headers
     let filename = format!("{}.zip", folder_name);
-    let mut response = warp::reply::Response::new(buffer.into());
+    let body = warp::hyper::Body::wrap_stream(stream);
+    let mut response = warp::reply::Response::new(body);
     let headers = response.headers_mut();
     headers.insert(warp::http::header::CONTENT_TYPE, HeaderValue::from_static("application/zip"));
     headers.insert(
@@ -267,4 +287,88 @@ pub async fn handle_download_folder(query: DownloadQuery, state: ServerState) ->
     );
     
     Ok(response)
+}
+
+pub async fn handle_upload(
+    form: FormData,
+    query: DownloadQuery,
+    state: ServerState,
+) -> Result<impl Reply, Rejection> {
+    let root_path = state.get_root_path();
+    
+    // Validate and construct target path
+    let path = Path::new(&query.path);
+    let mut target_dir = root_path.clone();
+    for component in path.components() {
+        match component {
+            std::path::Component::Normal(name) => target_dir.push(name),
+            _ => continue,
+        }
+    }
+    
+    // Security check
+    if !target_dir.starts_with(&root_path) {
+        return Err(warp::reject::not_found());
+    }
+    
+    // Create directory if it doesn't exist
+    if !target_dir.exists() {
+        fs::create_dir_all(&target_dir).map_err(|_| warp::reject::reject())?;
+    }
+    
+    // Process uploaded files
+    let mut uploaded_files = Vec::new();
+    let mut parts = form;
+    
+    while let Ok(Some(part)) = parts.try_next().await {
+        let filename = match part.filename() {
+            Some(name) => name.to_string(),
+            None => continue,
+        };
+        
+        // Sanitize filename
+        let safe_filename = sanitize_filename(&filename);
+        let file_path = target_dir.join(&safe_filename);
+        
+        // Read file data
+        let mut data = Vec::new();
+        let mut stream = part.stream();
+        
+        while let Ok(Some(mut chunk)) = stream.try_next().await {
+            // Convert Buf to bytes and extend data
+            while chunk.has_remaining() {
+                let bytes = chunk.chunk();
+                data.extend_from_slice(bytes);
+                let len = bytes.len();
+                chunk.advance(len);
+            }
+        }
+        
+        // Write file
+        match fs::File::create(&file_path) {
+            Ok(mut file) => {
+                if file.write_all(&data).is_ok() {
+                    uploaded_files.push(safe_filename);
+                }
+            }
+            Err(_) => continue,
+        }
+    }
+    
+    Ok(warp::reply::json(&serde_json::json!({
+        "success": true,
+        "uploaded": uploaded_files,
+        "count": uploaded_files.len()
+    })))
+}
+
+// Sanitize filename to prevent directory traversal
+fn sanitize_filename(filename: &str) -> String {
+    filename
+        .replace("..", "")
+        .replace("/", "_")
+        .replace("\\", "_")
+        .chars()
+        .filter(|c| c.is_alphanumeric() || *c == '.' || *c == '-' || *c == '_' || *c == ' ')
+        .collect()
 }
