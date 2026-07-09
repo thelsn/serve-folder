@@ -6,7 +6,10 @@ pub async fn serve_web_ui(path: warp::path::Tail) -> Result<impl Reply, Rejectio
     let content_type = match path {
         "" | "index.html" => ("text/html", include_str!("../web/index.html")),
         "style.css" => ("text/css", include_str!("../web/style.css")),
+        "styles.css" => ("text/css", include_str!("../web/styles.css")),
         "script.js" => ("application/javascript", include_str!("../web/script.js")),
+        "service-worker.js" => ("application/javascript", include_str!("../web/service-worker.js")),
+        "manifest.json" => ("application/manifest+json", include_str!("../web/manifest.json")),
         _ => return Err(warp::reject::not_found()),
     };
     

@@ -94,6 +94,19 @@ pub async fn create_zip_archive(
                 }
             }
 
+            zip.start_file(&rel_path, options)?;
+
+            let mut source = BufReader::new(fs::File::open(path)?);
+            loop {
+                let bytes_read = source.read(&mut buffer)?;
+                if bytes_read == 0 {
+                    break;
+                }
+                zip.write_all(&buffer[..bytes_read])?;
+            }
+
+            processed_files += 1;
+
             state.update_progress(
                 &operation_id,
                 ZipProgress {
@@ -107,19 +120,6 @@ pub async fn create_zip_archive(
                     },
                 },
             );
-
-            zip.start_file(&rel_path, options)?;
-
-            let mut source = BufReader::new(fs::File::open(path)?);
-            loop {
-                let bytes_read = source.read(&mut buffer)?;
-                if bytes_read == 0 {
-                    break;
-                }
-                zip.write_all(&buffer[..bytes_read])?;
-            }
-
-            processed_files += 1;
         }
 
         state.update_progress(

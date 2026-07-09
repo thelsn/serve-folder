@@ -3,7 +3,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Register Service Worker for PWA
     if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.register('/service-worker.js')
+        navigator.serviceWorker.register('/webui/service-worker.js')
             .then(registration => console.log('Service Worker registered'))
             .catch(error => console.log('Service Worker registration failed:', error));
     }
@@ -28,7 +28,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Render breadcrumb navigation
     const renderBreadcrumb = (path) => {
-        const breadcrumb = document.getElementById('breadcrumb');
+        const breadcrumb = document.getElementById('breadcrumbs');
         const parts = path ? path.split('/').filter(p => p) : [];
         
         let html = '<a href="#" data-path="">🏠 Home</a>';

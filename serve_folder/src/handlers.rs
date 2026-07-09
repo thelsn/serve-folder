@@ -1,6 +1,8 @@
 use std::path::Path;
 use std::fs;
 use std::io::Write;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use warp::{Reply, Rejection, http::HeaderValue, multipart::FormData};
 use tempfile::NamedTempFile;
 use futures_util::{TryStreamExt, StreamExt};
@@ -238,6 +240,7 @@ pub async fn handle_download_folder(query: DownloadQuery, state: ServerState) ->
         operation_id.clone(),
         state.clone()
     ).await {
+        state.remove_progress(&operation_id);
         return Err(warp::reject::custom(ZipCreationError));
     }
     
@@ -258,16 +261,38 @@ pub async fn handle_download_folder(query: DownloadQuery, state: ServerState) ->
         Ok(file) => file,
         Err(_) => {
             let _ = fs::remove_file(&temp_path);
+            state.remove_progress(&operation_id);
             return Err(warp::reject::custom(ZipCreationError));
         }
     };
     
+    let cleaned = Arc::new(AtomicBool::new(false));
+    let cleanup_zip = |path: std::path::PathBuf, state: ServerState, op_id: String, cleaned: Arc<AtomicBool>| async move {
+        if cleaned.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        let _ = tokio::fs::remove_file(&path).await;
+        state.remove_progress(&op_id);
+    };
+    
+    let fallback_path = temp_path.clone();
+    let fallback_state = state.clone();
+    let fallback_op_id = operation_id.clone();
+    let fallback_cleaned = cleaned.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+        cleanup_zip(fallback_path, fallback_state, fallback_op_id, fallback_cleaned).await;
+    });
+    
     let cleanup_path = temp_path.clone();
+    let cleanup_state = state.clone();
+    let cleanup_op_id = operation_id.clone();
+    let stream_cleaned = cleaned.clone();
     let byte_stream = ReaderStream::new(file).map(|result| {
         result.map_err(|err| std::io::Error::new(std::io::ErrorKind::Other, err))
     });
     let stream = byte_stream.chain(futures_util::stream::once(async move {
-        let _ = tokio::fs::remove_file(cleanup_path).await;
+        cleanup_zip(cleanup_path, cleanup_state, cleanup_op_id, stream_cleaned).await;
         Ok::<bytes::Bytes, std::io::Error>(bytes::Bytes::new())
     }));
     
@@ -364,11 +389,23 @@ pub async fn handle_upload(
 
 // Sanitize filename to prevent directory traversal
 fn sanitize_filename(filename: &str) -> String {
-    filename
+    let sanitized: String = filename
         .replace("..", "")
         .replace("/", "_")
         .replace("\\", "_")
         .chars()
         .filter(|c| c.is_alphanumeric() || *c == '.' || *c == '-' || *c == '_' || *c == ' ')
-        .collect()
+        .collect();
+
+    if sanitized.is_empty() {
+        format!(
+            "upload_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis()
+        )
+    } else {
+        sanitized
+    }
 }
