@@ -1,0 +1,2 @@
+# Batch files misbehave with LF-only line endings
+*.bat text eol=crlf
