@@ -11,7 +11,7 @@ use tokio::sync::oneshot;
 use warp::Filter;
 
 use crate::state::ServerState;
-use crate::handlers::{handle_list, handle_stop, handle_download_folder, handle_zip_progress, handle_zip_init, handle_upload};
+use crate::handlers::{handle_list, handle_stop, handle_download_folder, handle_zip_progress, handle_zip_init, handle_upload, handle_rejection, same_origin_only};
 use crate::web::serve_web_ui;
 
 #[tokio::main]
@@ -23,7 +23,15 @@ async fn main() {
         std::process::exit(1);
     }
 
-    let serve_path = PathBuf::from(&args[1]);
+    // Explorer passes a drive root as "C:\" and the trailing backslash escapes the closing
+    // quote, so it arrives as C:" (and a bare C: would mean the current dir on C:, not the
+    // root). Quotes can't appear in Windows paths, so turn it back into the backslash.
+    let mut arg = args[1].clone();
+    if cfg!(windows) && arg.trim_end().ends_with('"') {
+        arg.truncate(arg.trim_end().len() - 1);
+        arg.push('\\');
+    }
+    let serve_path = PathBuf::from(arg);
     if !serve_path.is_dir() {
         eprintln!("Error: Provided path is not a directory");
         std::process::exit(1);
@@ -39,6 +47,7 @@ async fn main() {
     // Create API routes
     let api_stop = warp::path!("api" / "stop")
         .and(warp::post())
+        .and(same_origin_only())
         .and(warp::body::json())
         .and(state.with_state())
         .and_then(handle_stop);
@@ -68,8 +77,11 @@ async fn main() {
 
     let api_upload = warp::path!("api" / "upload")
         .and(warp::post())
-        .and(warp::multipart::form().max_length(5_000_000_000)) // 5GB max
+        .and(same_origin_only())
+        // No size cap: files are streamed to disk, and whole folders can be uploaded at once
+        .and(warp::multipart::form().max_length(None))
         .and(warp::query())
+        .and(warp::header::optional::<String>("sec-fetch-mode"))
         .and(state.with_state())
         .and_then(handle_upload);
 
@@ -79,10 +91,11 @@ async fn main() {
         .and(warp::path::tail())
         .and_then(serve_web_ui);
 
-    // Redirect root to web UI
+    // Redirect root to web UI. Not a permanent redirect: browsers cache those forever,
+    // which would break whatever else is later run on port 8080.
     let root_redirect = warp::path::end()
         .and(warp::get())
-        .map(|| warp::redirect(warp::http::Uri::from_static("/webui")));
+        .map(|| warp::redirect::found(warp::http::Uri::from_static("/webui/")));
 
     // Create combined routes
     let routes = api_stop
@@ -93,18 +106,27 @@ async fn main() {
         .or(api_upload)
         .or(web_ui)
         .or(root_redirect)
-        .or(warp::fs::dir(serve_path));
+        .or(warp::fs::dir(serve_path))
+        .recover(handle_rejection);
 
     let addr: SocketAddr = ([0, 0, 0, 0], 8080).into();
-    println!("Serving on http://127.0.0.1:8080 Visit this URL to access the web UI.");
-    println!("Press Ctrl+C to stop the server");
 
     // Run server with graceful shutdown
-    let (_, server) = warp::serve(routes)
-        .bind_with_graceful_shutdown(addr, async {
+    let server = match warp::serve(routes)
+        .try_bind_with_graceful_shutdown(addr, async {
             rx.await.ok();
             println!("Server shutting down");
-        });
+        }) {
+        Ok((_, server)) => server,
+        Err(err) => {
+            eprintln!("Error: could not listen on port 8080 (is another server already running?): {}", err);
+            std::process::exit(1);
+        }
+    };
+
+    println!("ServeOn8080 v{}", env!("CARGO_PKG_VERSION"));
+    println!("Serving on http://127.0.0.1:8080 Visit this URL to access the web UI.");
+    println!("Press Ctrl+C to stop the server");
 
     // Run the server
     server.await;

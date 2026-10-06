@@ -25,10 +25,16 @@ pub struct ZipProgress {
     pub processed_files: usize,
     pub total_files: usize,
     pub percentage: f32,
+    /// The whole archive has been sent to the client
+    pub done: bool,
+    /// Zipping failed or the download was cancelled
+    pub failed: bool,
 }
 
 #[derive(Deserialize)]
 pub struct DownloadQuery {
+    // Optional so that requests without a path (e.g. the PWA share target) use the root
+    #[serde(default)]
     pub path: String,
     pub operation_id: Option<String>,
 }
@@ -40,5 +46,5 @@ pub struct ProgressQuery {
 
 // Error types
 #[derive(Debug)]
-pub struct ZipCreationError;
-impl warp::reject::Reject for ZipCreationError {}
+pub struct CrossSiteRequest;
+impl warp::reject::Reject for CrossSiteRequest {}

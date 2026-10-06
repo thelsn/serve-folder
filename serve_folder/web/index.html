@@ -4,11 +4,11 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>File Server</title>
-    <link rel="stylesheet" href="webui/styles.css">
-    <link rel="stylesheet" href="webui/style.css">
-    <link rel="manifest" href="webui/manifest.json">
+    <link rel="stylesheet" href="/webui/styles.css">
+    <link rel="stylesheet" href="/webui/style.css">
+    <link rel="manifest" href="/webui/manifest.json">
     <meta name="theme-color" content="#4CAF50">
-    <link rel="apple-touch-icon" href="webui/icon-192.png">
+    <link rel="icon" href="/webui/icon.svg" type="image/svg+xml">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 </head>
@@ -18,7 +18,7 @@
             <h1>📁 File Server</h1>
             <div class="header-actions">
                 <button id="uploadBtn" class="btn btn-primary">📤 Upload Files</button>
-                <button id="stopBtn" class="btn btn-danger">⏹ Stop Server</button>
+                <button id="stopBtn" class="btn danger">⏹ Stop Server</button>
             </div>
         </header>
         
@@ -51,10 +51,16 @@
     <div id="uploadModal" class="modal">
         <div class="modal-content">
             <span class="close">&times;</span>
-            <h2>Upload Files</h2>
+            <h2>Upload</h2>
+            <p class="upload-destination">To: <strong id="uploadDestination">🏠 Home</strong></p>
             <div class="upload-area" id="uploadArea">
-                <p>📎 Drag & drop files here or click to browse</p>
+                <p>📎 Drag &amp; drop files or folders here</p>
+                <div class="upload-buttons">
+                    <button type="button" class="btn btn-primary">Choose files</button>
+                    <button type="button" class="btn" id="pickFolderBtn">Choose a folder</button>
+                </div>
                 <input type="file" id="fileInput" multiple style="display: none;">
+                <input type="file" id="folderInput" webkitdirectory multiple style="display: none;">
             </div>
             <div id="uploadProgress" class="upload-progress" style="display: none;">
                 <p class="upload-status">Uploading...</p>
@@ -65,7 +71,11 @@
             </div>
         </div>
     </div>
-    
-    <script src="script.js"></script>
+
+    <div id="dropOverlay" class="drop-overlay">
+        <p>📤 Drop to upload to <strong>🏠 Home</strong></p>
+    </div>
+
+    <script src="/webui/script.js"></script>
 </body>
 </html>

@@ -41,6 +41,17 @@ header {
     background-color: #3367d6;
 }
 
+a.btn {
+    display: inline-block;
+    text-decoration: none;
+}
+
+.btn-sm {
+    padding: 4px 10px;
+    font-size: 13px;
+    white-space: nowrap;
+}
+
 .btn.danger {
     background-color: #ea4335;
 }
@@ -71,6 +82,60 @@ header {
     border-radius: 4px;
     box-shadow: 0 1px 3px rgba(0,0,0,0.1);
     min-height: 400px;
+}
+
+.file-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.file-table th,
+.file-table td {
+    padding: 10px 15px;
+    border-bottom: 1px solid #eee;
+    text-align: left;
+}
+
+.file-table tbody tr:hover {
+    background-color: #f8f9fa;
+}
+
+.file-table .file-name {
+    word-break: break-word;
+}
+
+.file-table .file-name a {
+    color: #4285f4;
+    text-decoration: none;
+}
+
+.file-table .file-name a:hover {
+    text-decoration: underline;
+}
+
+.file-table .file-size {
+    color: #666;
+    white-space: nowrap;
+    text-align: right;
+}
+
+.file-table .file-actions {
+    text-align: right;
+}
+
+.file-table .file-actions .btn + .btn {
+    margin-left: 6px;
+}
+
+.file-list .empty,
+.file-list .error {
+    padding: 40px 15px;
+    text-align: center;
+    color: #666;
+}
+
+.file-list .error {
+    color: #d33426;
 }
 
 .file-item {

@@ -5,11 +5,12 @@
     gap: 10px;
 }
 
-.btn-primary {
+/* .btn.btn-primary so it beats .btn from style.css, which loads after this file */
+.btn.btn-primary {
     background: #4CAF50;
 }
 
-.btn-primary:hover {
+.btn.btn-primary:hover {
     background: #45a049;
 }
 
@@ -44,17 +45,56 @@
 }
 
 .close:hover {
-    color: #fff;
+    color: #333;
+}
+
+.upload-destination {
+    color: #666;
+    word-break: break-word;
 }
 
 .upload-area {
     border: 3px dashed #4CAF50;
     border-radius: 8px;
-    padding: 60px 20px;
+    padding: 40px 20px;
     text-align: center;
     cursor: pointer;
     transition: all 0.3s ease;
     margin: 20px 0;
+}
+
+.upload-buttons {
+    display: flex;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+/* Shown while files are dragged over the page */
+.drop-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 2000;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    background: rgba(76, 175, 80, 0.15);
+    border: 4px dashed #4CAF50;
+    pointer-events: none;
+}
+
+.drop-overlay.visible {
+    display: flex;
+}
+
+.drop-overlay p {
+    background: white;
+    padding: 16px 24px;
+    border-radius: 8px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+    font-size: 18px;
+    text-align: center;
 }
 
 .upload-area:hover {
@@ -64,7 +104,7 @@
 
 .upload-area.dragover {
     background: rgba(76, 175, 80, 0.2);
-    border-color: #fff;
+    border-color: #2e7d32;
 }
 
 .upload-progress {
@@ -84,7 +124,7 @@
         width: 100%;
     }
     
-    .btn {
+    .header-actions .btn {
         width: 100%;
     }
     
